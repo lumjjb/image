@@ -28,7 +28,7 @@ import (
 // AESSIVLayerBlockCipher implements the AES SIV block cipher
 type AESSIVLayerBlockCipher struct {
 	keylen    int // in bytes
-	reader    io.ReaderAt
+	reader    io.Reader
 	encryptor *miscreant.StreamEncryptor
 	decryptor *miscreant.StreamDecryptor
 	err       error  // error that occurred during operation
@@ -74,9 +74,11 @@ func (r *aessivcryptor) Read(p []byte) (int, error) {
 		// read new data; we expect to get r.bc.toread number of bytes
 		// for anything less we assume it's EOF
 		numbytes := 0
+		buf := make([]byte, 1024*1024)
 		for numbytes < r.bc.toread {
 			var n int
-			n, r.bc.err = r.bc.reader.ReadAt(r.bc.inbuffer[numbytes:r.bc.toread-numbytes], r.bc.inoffset+int64(numbytes))
+			n, r.bc.err = r.bc.reader.Read(buf)
+			r.bc.inbuffer = append(r.bc.inbuffer, buf[:n]...)
 			numbytes += n
 			if r.bc.err != nil {
 				if r.bc.err == io.EOF {
@@ -113,7 +115,7 @@ func (r *aessivcryptor) Read(p []byte) (int, error) {
 }
 
 // init initializes an instance
-func (bc *AESSIVLayerBlockCipher) init(encrypt bool, reader io.ReaderAt, opt LayerBlockCipherOptions) (LayerBlockCipherOptions, error) {
+func (bc *AESSIVLayerBlockCipher) init(encrypt bool, reader io.Reader, opt LayerBlockCipherOptions) (LayerBlockCipherOptions, error) {
 	var (
 		err error
 		se  miscreant.StreamEncryptor
@@ -134,8 +136,8 @@ func (bc *AESSIVLayerBlockCipher) init(encrypt bool, reader io.ReaderAt, opt Lay
 		}
 	}
 
-	bc.inbuffer = make([]byte, 1024*1024)
-	bc.toread = len(bc.inbuffer)
+	bc.inbuffer = make([]byte, 0, 1024*1024)
+	bc.toread = cap(bc.inbuffer)
 	bc.inoffset = 0
 	bc.outbuffer = nil
 	bc.outoffset = 0
@@ -174,7 +176,7 @@ func (bc *AESSIVLayerBlockCipher) GenerateKey() []byte {
 }
 
 // Encrypt takes in layer data and returns the ciphertext and relevant LayerBlockCipherOptions
-func (bc *AESSIVLayerBlockCipher) Encrypt(plainDataReader io.ReaderAt, opt LayerBlockCipherOptions) (io.Reader, LayerBlockCipherOptions, error) {
+func (bc *AESSIVLayerBlockCipher) Encrypt(plainDataReader io.Reader, opt LayerBlockCipherOptions) (io.Reader, LayerBlockCipherOptions, error) {
 	lbco, err := bc.init(true, plainDataReader, opt)
 	if err != nil {
 		return nil, LayerBlockCipherOptions{}, err
@@ -184,7 +186,7 @@ func (bc *AESSIVLayerBlockCipher) Encrypt(plainDataReader io.ReaderAt, opt Layer
 }
 
 // Decrypt takes in layer ciphertext data and returns the plaintext and relevant LayerBlockCipherOptions
-func (bc *AESSIVLayerBlockCipher) Decrypt(encDataReader io.ReaderAt, opt LayerBlockCipherOptions) (io.Reader, LayerBlockCipherOptions, error) {
+func (bc *AESSIVLayerBlockCipher) Decrypt(encDataReader io.Reader, opt LayerBlockCipherOptions) (io.Reader, LayerBlockCipherOptions, error) {
 	lbco, err := bc.init(false, encDataReader, opt)
 	if err != nil {
 		return nil, LayerBlockCipherOptions{}, err
