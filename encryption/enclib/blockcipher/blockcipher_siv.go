@@ -74,11 +74,9 @@ func (r *aessivcryptor) Read(p []byte) (int, error) {
 		// read new data; we expect to get r.bc.toread number of bytes
 		// for anything less we assume it's EOF
 		numbytes := 0
-		buf := make([]byte, 1024*1024)
 		for numbytes < r.bc.toread {
 			var n int
-			n, r.bc.err = r.bc.reader.Read(buf)
-			r.bc.inbuffer = append(r.bc.inbuffer, buf[:n]...)
+			n, r.bc.err = r.bc.reader.Read(r.bc.inbuffer[numbytes : r.bc.toread-numbytes])
 			numbytes += n
 			if r.bc.err != nil {
 				if r.bc.err == io.EOF {
@@ -136,8 +134,8 @@ func (bc *AESSIVLayerBlockCipher) init(encrypt bool, reader io.Reader, opt Layer
 		}
 	}
 
-	bc.inbuffer = make([]byte, 0, 1024*1024)
-	bc.toread = cap(bc.inbuffer)
+	bc.inbuffer = make([]byte, 1024*1024)
+	bc.toread = len(bc.inbuffer)
 	bc.inoffset = 0
 	bc.outbuffer = nil
 	bc.outoffset = 0
