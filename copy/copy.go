@@ -119,7 +119,7 @@ type imageCopier struct {
 	canModifyManifest  bool
 	canSubstituteBlobs bool
 	dcparameters       []string
-	isCachedImage      bool
+	checkAuthorization bool
 }
 
 // Options allows supplying non-default configuration modifying the behavior of CopyImage.
@@ -133,7 +133,7 @@ type Options struct {
 	Progress         chan types.ProgressProperties // Reported to when ProgressInterval has arrived for a single artifact+offset.
 	// manifest MIME type of image set by user. "" is default and means use the autodetection to the the manifest MIME type
 	ForceManifestMIMEType string
-	UnwrapOnly            bool
+	CheckAuthorization    bool
 }
 
 // Image copies image from srcRef to destRef, using policyContext to validate
@@ -302,9 +302,9 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 		manifestUpdates: &types.ManifestUpdateOptions{InformationOnly: types.ManifestUpdateInformation{Destination: c.dest}},
 		src:             src,
 		// diffIDsAreNeeded is computed later
-		canModifyManifest: len(sigs) == 0 && !destIsDigestedReference,
-		dcparameters:      options.SourceCtx.DecryptParams,
-		isCachedImage:     options.UnwrapOnly,
+		canModifyManifest:  len(sigs) == 0 && !destIsDigestedReference,
+		dcparameters:       options.SourceCtx.DecryptParams,
+		checkAuthorization: options.CheckAuthorization,
 	}
 	// Ensure _this_ copy sees exactly the intended data when either processing a signed image or signing it.
 	// This may be too conservative, but for now, better safe than sorry, _especially_ on the SignBy path:
@@ -675,7 +675,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, po
 	// present in the image cached. For every layer we will try to unwrap
 	// the symmetric key with the provided private keys. If we fail, we will
 	// not allow the image to be provisioned.
-	if ic.isCachedImage {
+	if ic.checkAuthorization {
 		if srcInfo.MediaType == manifest.DockerV2Schema2LayerGzipEncMediaType ||
 			srcInfo.MediaType == manifest.DockerV2Schema2LayerEncMediaType {
 
