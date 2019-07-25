@@ -938,6 +938,36 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		inputInfo = srcInfo
 	}
 
+	// Perform image encryption for valid mediatypes if encryptConfig provided
+	// TODO: Provide ability to select layer for decryption
+	var encryptMediaType string
+	switch srcInfo.MediaType {
+	case manifest.DockerV2Schema2LayerGzipEncMediaType, ocispec.MediaTypeImageLayerGzip:
+		encryptMediaType = manifest.DockerV2Schema2LayerGzipEncMediaType
+	case manifest.DockerV2Schema2LayerMediaType, ocispec.MediaTypeImageLayer:
+		encryptMediaType = manifest.DockerV2Schema2LayerEncMediaType
+	}
+
+	if encryptMediaType != "" && c.encryptConfig != nil {
+		desc := ocispec.Descriptor{
+			MediaType:   srcInfo.MediaType,
+			Digest:      srcInfo.Digest,
+			Size:        srcInfo.Size,
+			Annotations: srcInfo.Annotations,
+		}
+
+		s, annotations, err := enclib.EncryptLayer(c.encryptConfig, destStream, desc)
+		if err != nil {
+			return types.BlobInfo{}, errors.Wrapf(err, "Image authentication failed for the digest %+v", srcInfo.Digest)
+		}
+
+		destStream = s
+		inputInfo.Digest = ""
+		inputInfo.Size = -1
+		inputInfo.Annotations = annotations
+		inputInfo.MediaType = encryptMediaType
+	}
+
 	// === Report progress using the c.progress channel, if required.
 	if c.progress != nil && c.progressInterval > 0 {
 		destStream = &progressReader{
