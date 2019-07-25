@@ -1,10 +1,12 @@
 package encryption
 
-import ()
+import (
+	encconfig "github.com/containers/image/encryption/enclib/config"
+)
 
-// EncryptionMechanism abstracts a way to encrypt images and layers
+// Mechanism abstracts a way to encrypt images and layers
 // Each mechanism should eventually be closed by calling Close().
-type EncryptionMechanism interface {
+type Mechanism interface {
 	// Close removes resources associated with the mechanism, if any.
 	Close() error
 
@@ -18,9 +20,9 @@ type EncryptionMechanism interface {
 
 	// Sign creates a (non-detached) signature of input using keyIdentity.
 	// Fails with a SigningNotSupportedError if the mechanism does not support signing.
-	EncryptLayer(kp KeyPolicy, ep EncryptPolicy) // TODO: for the fns here, figure out ret/args required
-	DecryptLayer(kp KeyPolicy)
-	CheckAuthorization(kp KeyPolicy)
+	EncryptLayer(ec *encconfig.EncryptConfig, ep EncryptPolicy) // TODO: for the fns here, figure out ret/args required
+	DecryptLayer(dc *encconfig.DecryptConfig)
+	CheckAuthorization(dc *encconfig.DecryptConfig)
 
 	// TODO: potentially add equivalent for Images instead of layers
 }

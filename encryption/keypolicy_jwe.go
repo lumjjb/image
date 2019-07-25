@@ -1,5 +1,6 @@
 package encryption
 
+/*
 import (
 	"github.com/containers/image/encryption/enclib/config"
 	"github.com/pkg/errors"
@@ -65,3 +66,4 @@ func (kp *jweKeyPolicy) getCryptoConfig() (config.CryptoConfig, error) {
 func (kp *jweKeyPolicy) supportedKeyWrapProtocols() []string {
 	return []string{"jwe"}
 }
+*/
