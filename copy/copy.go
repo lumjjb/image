@@ -106,7 +106,8 @@ type copier struct {
 	progress         chan types.ProgressProperties
 	blobInfoCache    types.BlobInfoCache
 	copyInParallel   bool
-	cryptoConfig     *encconfig.CryptoConfig
+	decryptConfig    *encconfig.DecryptConfig
+	encryptConfig    *encconfig.EncryptConfig
 }
 
 // imageCopier tracks state specific to a single image (possibly an item of a manifest list)
@@ -117,8 +118,9 @@ type imageCopier struct {
 	diffIDsAreNeeded   bool
 	canModifyManifest  bool
 	canSubstituteBlobs bool
-	cryptoConfig       *encconfig.CryptoConfig
 	checkAuthorization bool
+	decryptConfig      *encconfig.DecryptConfig
+	encryptConfig      *encconfig.EncryptConfig
 }
 
 // Options allows supplying non-default configuration modifying the behavior of CopyImage.
@@ -133,6 +135,8 @@ type Options struct {
 	// manifest MIME type of image set by user. "" is default and means use the autodetection to the the manifest MIME type
 	ForceManifestMIMEType string
 	CheckAuthorization    bool
+	// If non-nil indicates that image should be encrypted.
+	EncryptConfig *encconfig.EncryptConfig
 }
 
 // Image copies image from srcRef to destRef, using policyContext to validate
@@ -296,14 +300,24 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 		}
 	}
 
+	var (
+		ec *encconfig.EncryptConfig
+		dc *encconfig.DecryptConfig
+	)
+	if options.SourceCtx.CryptoConfig != nil {
+		ec = options.SourceCtx.CryptoConfig.EncryptConfig
+		dc = options.SourceCtx.CryptoConfig.DecryptConfig
+	}
+
 	ic := imageCopier{
 		c:               c,
 		manifestUpdates: &types.ManifestUpdateOptions{InformationOnly: types.ManifestUpdateInformation{Destination: c.dest}},
 		src:             src,
 		// diffIDsAreNeeded is computed later
 		canModifyManifest:  len(sigs) == 0 && !destIsDigestedReference,
-		cryptoConfig:       options.SourceCtx.CryptoConfig,
 		checkAuthorization: options.CheckAuthorization,
+		decryptConfig:      dc,
+		encryptConfig:      ec,
 	}
 	// Ensure _this_ copy sees exactly the intended data when either processing a signed image or signing it.
 	// This may be too conservative, but for now, better safe than sorry, _especially_ on the SignBy path:
@@ -695,11 +709,11 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, po
 		if srcInfo.MediaType == manifest.DockerV2Schema2LayerGzipEncMediaType ||
 			srcInfo.MediaType == manifest.DockerV2Schema2LayerEncMediaType {
 
-			if ic.cryptoConfig == nil || ic.cryptoConfig.DecryptConfig == nil {
+			if ic.decryptConfig == nil {
 				return types.BlobInfo{}, "", errors.New("Necessary DecryptParameters not present")
 			}
 
-			dc := ic.cryptoConfig.DecryptConfig
+			dc := ic.decryptConfig
 
 			newDesc := ocispec.Descriptor{
 				Annotations: srcInfo.Annotations,
@@ -793,7 +807,9 @@ func (ic *imageCopier) copyLayerFromStream(ctx context.Context, srcStream io.Rea
 			return pipeWriter
 		}
 	}
-	ic.c.cryptoConfig = ic.cryptoConfig
+	ic.c.decryptConfig = ic.decryptConfig
+	ic.c.encryptConfig = ic.encryptConfig
+
 	blobInfo, err := ic.c.copyBlobFromStream(ctx, srcStream, srcInfo, getDiffIDRecorder, ic.canModifyManifest, false, bar) // Sets err to nil on success
 	return blobInfo, diffIDChan, err
 	// We need the defer … pipeWriter.CloseWithError() to happen HERE so that the caller can block on reading from diffIDChan
@@ -846,11 +862,11 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 	if srcInfo.MediaType == manifest.DockerV2Schema2LayerGzipEncMediaType ||
 		srcInfo.MediaType == manifest.DockerV2Schema2LayerEncMediaType {
 
-		if c.cryptoConfig == nil || c.cryptoConfig.DecryptConfig == nil {
+		if c.decryptConfig == nil {
 			return types.BlobInfo{}, errors.New("Necessary DecryptParameters not present")
 		}
 
-		dc := c.cryptoConfig.DecryptConfig
+		dc := c.decryptConfig
 
 		newDesc := ocispec.Descriptor{
 			Annotations: srcInfo.Annotations,

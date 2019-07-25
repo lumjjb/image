@@ -9,7 +9,7 @@ type readerAtReader struct {
 	off int64
 }
 
-// Takes an io.ReaderAt and returns an io.Reader
+// ReaderFromReaderAt takes an io.ReaderAt and returns an io.Reader
 func ReaderFromReaderAt(r io.ReaderAt) io.Reader {
 	return &readerAtReader{
 		r:   r,
