@@ -733,7 +733,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 				Annotations: srcInfo.Annotations,
 			}
 
-			_, err := enclib.DecryptLayer(dc, nil, newDesc, true)
+			_, _, err := enclib.DecryptLayer(dc, nil, newDesc, true)
 			if err != nil {
 				return types.BlobInfo{}, "", errors.Wrapf(err, "Image authentication failed for the digest %+v", srcInfo.Digest)
 			}
@@ -886,12 +886,13 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 			Annotations: srcInfo.Annotations,
 		}
 
-		srcStream, err = enclib.DecryptLayer(dc, srcStream, newDesc, false)
+        var d digest.Digest
+		srcStream, d, err = enclib.DecryptLayer(dc, srcStream, newDesc, false)
 		if err != nil {
 			return types.BlobInfo{}, errors.Wrapf(err, "Error decrypting layer %s", srcInfo.Digest)
 		}
 
-		srcInfo.Digest = ""
+		srcInfo.Digest = d
 		srcInfo.Size = -1
 	}
 
