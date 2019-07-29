@@ -973,7 +973,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 
 			s, annotations, err := enclib.EncryptLayer(c.encryptConfig, destStream, desc)
 			if err != nil {
-				return types.BlobInfo{}, errors.Wrapf(err, "Image authentication failed for the digest %+v", srcInfo.Digest)
+				return types.BlobInfo{}, errors.Wrapf(err, "Image encryption failed for the digest %+v", srcInfo.Digest)
 			}
 
 			destStream = s
