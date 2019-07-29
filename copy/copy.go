@@ -883,6 +883,12 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 
 		srcInfo.Digest = d
 		srcInfo.Size = -1
+		switch srcInfo.MediaType {
+		case manifest.DockerV2Schema2LayerGzipEncMediaType:
+			srcInfo.MediaType = ocispec.MediaTypeImageLayerGzip
+		case manifest.DockerV2Schema2LayerEncMediaType:
+			srcInfo.MediaType = ocispec.MediaTypeImageLayer
+		}
 	}
 
 	skipDigestValidation := srcInfo.Digest == ""
