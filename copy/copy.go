@@ -263,6 +263,10 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 		return nil, errors.Wrapf(err, "Error initializing image from source %s", transports.ImageName(c.rawSource.Reference()))
 	}
 
+	if err = src.SupportsEncryption(ctx); err != nil && options.EncryptLayers != nil {
+		return nil, errors.Wrap(err, "Encryption requested but not supported by source image type")
+	}
+
 	// If the destination is a digested reference, make a note of that, determine what digest value we're
 	// expecting, and check that the source manifest matches it.
 	destIsDigestedReference := false
