@@ -121,7 +121,7 @@ type imageCopier struct {
 	checkAuthorization bool
 	decryptConfig      *encconfig.DecryptConfig
 	encryptConfig      *encconfig.EncryptConfig
-	encryptLayers      []int
+	encryptLayers      *[]int
 }
 
 // Options allows supplying non-default configuration modifying the behavior of CopyImage.
@@ -307,13 +307,16 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 
 	// Set up encryption structs
 	var (
-		ec *encconfig.EncryptConfig
+		//ec *encconfig.EncryptConfig
 		dc *encconfig.DecryptConfig
 	)
 	if options.SourceCtx.CryptoConfig != nil {
-		ec = options.SourceCtx.CryptoConfig.EncryptConfig
+		//ec = options.SourceCtx.CryptoConfig.EncryptConfig
 		dc = options.SourceCtx.CryptoConfig.DecryptConfig
 	}
+
+	encConfig := options.EncryptConfig
+	encLayers := options.EncryptLayers
 
 	ic := imageCopier{
 		c:               c,
@@ -323,7 +326,8 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 		canModifyManifest:  len(sigs) == 0 && !destIsDigestedReference,
 		checkAuthorization: options.CheckAuthorization,
 		decryptConfig:      dc,
-		encryptConfig:      ec,
+		encryptConfig:      encConfig,
+		encryptLayers:      encLayers,
 	}
 	// Ensure _this_ copy sees exactly the intended data when either processing a signed image or signing it.
 	// This may be too conservative, but for now, better safe than sorry, _especially_ on the SignBy path:
@@ -531,9 +535,9 @@ func (ic *imageCopier) copyLayers(ctx context.Context) error {
 	var encryptAll bool
 	encryptLayers := ic.encryptLayers != nil
 	if ic.encryptLayers != nil {
-		encryptAll = len(ic.encryptLayers) == 0
+		encryptAll = len(*ic.encryptLayers) == 0
 		totalLayers := len(srcInfos)
-		for _, l := range ic.encryptLayers {
+		for _, l := range *ic.encryptLayers {
 			// if layer is negative, it is reverse indexed.
 			encLayerBitmap[(totalLayers+l)%totalLayers] = true
 		}
