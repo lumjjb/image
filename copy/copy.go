@@ -861,6 +861,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 	// dest.PutBlob may detect that the layer already exists, in which case we don't
 	// read stream to the end, and validation does not happen.
 
+	var decrypted bool
 	var err error
 	if srcInfo.MediaType == manifest.DockerV2Schema2LayerGzipEncMediaType ||
 		srcInfo.MediaType == manifest.DockerV2Schema2LayerEncMediaType {
@@ -889,6 +890,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		case manifest.DockerV2Schema2LayerEncMediaType:
 			srcInfo.MediaType = ocispec.MediaTypeImageLayer
 		}
+		decrypted = true
 	}
 
 	skipDigestValidation := srcInfo.Digest == ""
@@ -947,6 +949,9 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		compressionOperation = types.PreserveOriginal
 		inputInfo = srcInfo
 	}
+	if decrypted {
+		inputInfo.MediaType = srcInfo.MediaType
+	}
 
 	// Perform image encryption for valid mediatypes if encryptConfig provided
 	if toEncrypt {
@@ -994,6 +999,11 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 	uploadedInfo, err := c.dest.PutBlob(ctx, destStream, inputInfo, c.blobInfoCache, isConfig)
 	if err != nil {
 		return types.BlobInfo{}, errors.Wrap(err, "Error writing blob")
+	}
+
+	// TODO: Add checks for encryption logic
+	if decrypted {
+		uploadedInfo.MediaType = srcInfo.MediaType
 	}
 
 	// This is fairly horrible: the writer from getOriginalLayerCopyWriter wants to consumer
