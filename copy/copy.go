@@ -975,8 +975,12 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 	}
 
 	// Perform image encryption for valid mediatypes if encryptConfig provided
+	var (
+		encryptAnnotations map[string]string
+		encryptMediaType   string
+		encrypted          bool
+	)
 	if toEncrypt {
-		var encryptMediaType string
 		switch srcInfo.MediaType {
 		case manifest.DockerV2Schema2LayerMediaType, ocispec.MediaTypeImageLayerGzip:
 			encryptMediaType = manifest.DockerV2Schema2LayerGzipEncMediaType
@@ -985,11 +989,15 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		}
 
 		if encryptMediaType != "" && c.encryptConfig != nil {
+			var annotations map[string]string
+			if !decrypted {
+				annotations = srcInfo.Annotations
+			}
 			desc := ocispec.Descriptor{
 				MediaType:   srcInfo.MediaType,
 				Digest:      srcInfo.Digest,
 				Size:        srcInfo.Size,
-				Annotations: srcInfo.Annotations,
+				Annotations: annotations,
 			}
 
 			s, annotations, err := enclib.EncryptLayer(c.encryptConfig, destStream, desc)
@@ -1002,6 +1010,8 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 			inputInfo.Size = -1
 			inputInfo.Annotations = annotations
 			inputInfo.MediaType = encryptMediaType
+			encryptAnnotations = annotations
+			encrypted = true
 		}
 	}
 
@@ -1022,9 +1032,17 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		return types.BlobInfo{}, errors.Wrap(err, "Error writing blob")
 	}
 
-	// TODO: Add checks for encryption logic
 	if decrypted {
 		uploadedInfo.MediaType = srcInfo.MediaType
+	}
+	if encrypted {
+		uploadedInfo.MediaType = encryptMediaType
+		if uploadedInfo.Annotations == nil {
+			uploadedInfo.Annotations = map[string]string{}
+		}
+		for k, v := range encryptAnnotations {
+			uploadedInfo.Annotations[k] = v
+		}
 	}
 
 	// This is fairly horrible: the writer from getOriginalLayerCopyWriter wants to consumer
