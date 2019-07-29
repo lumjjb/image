@@ -357,6 +357,8 @@ type Image interface {
 	// Everything in options.InformationOnly should be provided, other fields should be set only if a modification is desired.
 	// This does not change the state of the original Image object.
 	UpdatedImage(ctx context.Context, options ManifestUpdateOptions) (Image, error)
+	// SupportsEncryption errors if the image doesn't support encryption
+	SupportsEncryption(ctx context.Context) error
 	// Size returns an approximation of the amount of disk space which is consumed by the image in its current
 	// location.  If the size is not known, -1 will be returned.
 	Size() (int64, error)
