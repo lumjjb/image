@@ -17,6 +17,9 @@
 package config
 
 import (
+	"strings"
+
+	encutils "github.com/containers/image/encryption/enclib/utils"
 	"github.com/pkg/errors"
 )
 
@@ -131,4 +134,15 @@ func DecryptWithGpgPrivKeys(gpgPrivKeys, gpgPrivKeysPwds [][]byte) (CryptoConfig
 		},
 		DecryptConfig: &dc,
 	}, nil
+}
+
+// DecryptWithBase64Keys returns a CryptoConfig to decrypt with provided base64 strings of privKeysPasswords
+func DecryptWithBase64Keys(privKeysPasswords []string) (CryptoConfig, error) {
+	dcParams, err := encutils.SortDecryptionKeys(strings.Join(privKeysPasswords, ","))
+
+	return CryptoConfig{
+		DecryptConfig: &DecryptConfig{
+			Parameters: dcParams,
+		},
+	}, err
 }
