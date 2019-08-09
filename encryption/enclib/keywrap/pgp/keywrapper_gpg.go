@@ -114,7 +114,7 @@ func (kw *gpgKeyWrapper) UnwrapKey(dc *config.DecryptConfig, pgpPacket []byte) (
 				responded = true
 				for _, key := range keys {
 					if key.PrivateKey != nil {
-						key.PrivateKey.Decrypt(pgpPrivateKeysPwd[idx])
+						_ = key.PrivateKey.Decrypt(pgpPrivateKeysPwd[idx])
 					}
 				}
 				return pgpPrivateKeysPwd[idx], nil

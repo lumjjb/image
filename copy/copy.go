@@ -980,9 +980,9 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 
 	// Perform image encryption for valid mediatypes if encryptConfig provided
 	var (
-		encryptAnnotations map[string]string
-		encryptMediaType   string
-		encrypted          bool
+		encryptMediaType string
+		encrypted        bool
+		finalizer        enclib.EncryptLayerFinalizer
 	)
 	if toEncrypt {
 		switch srcInfo.MediaType {
@@ -1004,17 +1004,16 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 				Annotations: annotations,
 			}
 
-			s, annotations, err := enclib.EncryptLayer(c.encryptConfig, destStream, desc)
+			s, fin, err := enclib.EncryptLayer(c.encryptConfig, destStream, desc)
 			if err != nil {
 				return types.BlobInfo{}, errors.Wrapf(err, "Image encryption failed for the digest %+v", srcInfo.Digest)
 			}
 
 			destStream = s
+			finalizer = fin
 			inputInfo.Digest = ""
 			inputInfo.Size = -1
-			inputInfo.Annotations = annotations
 			inputInfo.MediaType = encryptMediaType
-			encryptAnnotations = annotations
 			encrypted = true
 		}
 	}
@@ -1040,6 +1039,10 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		uploadedInfo.MediaType = srcInfo.MediaType
 	}
 	if encrypted {
+		encryptAnnotations, err := finalizer()
+		if err != nil {
+			return types.BlobInfo{}, errors.Wrap(err, "Unable to finalize encryption")
+		}
 		uploadedInfo.MediaType = encryptMediaType
 		if uploadedInfo.Annotations == nil {
 			uploadedInfo.Annotations = map[string]string{}

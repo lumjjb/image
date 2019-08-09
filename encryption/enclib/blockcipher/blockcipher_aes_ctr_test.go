@@ -23,60 +23,64 @@ import (
 	"testing"
 )
 
-func TestBlockCipherAesSivCreateValid(t *testing.T) {
-	_, err := NewAESSIVLayerBlockCipher(256)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = NewAESSIVLayerBlockCipher(512)
+func TestBlockCipherAesCtrCreateValid(t *testing.T) {
+	_, err := NewAESCTRLayerBlockCipher(256)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestBlockCipherAesSivCreateInvalid(t *testing.T) {
-	_, err := NewAESSIVLayerBlockCipher(8)
+func TestBlockCipherAesCtrCreateInvalid(t *testing.T) {
+	_, err := NewAESCTRLayerBlockCipher(8)
 	if err == nil {
 		t.Fatal("Test should have failed due to invalid cipher size")
 	}
-	_, err = NewAESSIVLayerBlockCipher(255)
+	_, err = NewAESCTRLayerBlockCipher(255)
 	if err == nil {
 		t.Fatal("Test should have failed due to invalid cipher size")
 	}
 }
 
-func TestBlockCipherAesSivEncryption(t *testing.T) {
+func TestBlockCipherAesCtrEncryption(t *testing.T) {
 	var (
 		symKey = []byte("01234567890123456789012345678912")
 		opt    = LayerBlockCipherOptions{
-			SymmetricKey: symKey,
+			Private: PrivateLayerBlockCipherOptions{
+				SymmetricKey: symKey,
+			},
 		}
 		layerData = []byte("this is some data")
 	)
 
-	bc, err := NewAESSIVLayerBlockCipher(256)
+	bc, err := NewAESCTRLayerBlockCipher(256)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	layerDataReader := bytes.NewReader(layerData)
-	ciphertextReader, lbco, err := bc.Encrypt(layerDataReader, opt)
+	ciphertextReader, finalizer, err := bc.Encrypt(layerDataReader, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Use a different instantiated object to indicate an invocation at a diff time
-	bc2, err := NewAESSIVLayerBlockCipher(256)
+	bc2, err := NewAESCTRLayerBlockCipher(256)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	ciphertext := make([]byte, 1024)
 	encsize, err := ciphertextReader.Read(ciphertext)
+	if err != io.EOF {
+		t.Fatal("Expected EOF")
+	}
+
+	ciphertextTestReader := bytes.NewReader(ciphertext[:encsize])
+
+	lbco, err := finalizer()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ciphertextTestReader := bytes.NewReader(ciphertext[:encsize])
 
 	plaintextReader, _, err := bc2.Decrypt(ciphertextTestReader, lbco)
 	if err != nil {
@@ -85,8 +89,8 @@ func TestBlockCipherAesSivEncryption(t *testing.T) {
 
 	plaintext := make([]byte, 1024)
 	size, err := plaintextReader.Read(plaintext)
-	if err != nil && err != io.EOF {
-		t.Fatal(err)
+	if err != io.EOF {
+		t.Fatal("Expected EOF")
 	}
 
 	if string(plaintext[:size]) != string(layerData) {
@@ -94,40 +98,47 @@ func TestBlockCipherAesSivEncryption(t *testing.T) {
 	}
 }
 
-func TestBlockCipherAesSivEncryptionInvalidKey(t *testing.T) {
+func TestBlockCipherAesCtrEncryptionInvalidKey(t *testing.T) {
 	var (
 		symKey = []byte("01234567890123456789012345678912")
 		opt    = LayerBlockCipherOptions{
-			SymmetricKey: symKey,
+			Private: PrivateLayerBlockCipherOptions{
+				SymmetricKey: symKey,
+			},
 		}
 		layerData = []byte("this is some data")
 	)
 
-	bc, err := NewAESSIVLayerBlockCipher(256)
+	bc, err := NewAESCTRLayerBlockCipher(256)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	layerDataReader := bytes.NewReader(layerData)
-	ciphertextReader, lbco, err := bc.Encrypt(layerDataReader, opt)
+
+	ciphertextReader, finalizer, err := bc.Encrypt(layerDataReader, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Use a different instantiated object to indicate an invokation at a diff time
-	bc2, err := NewAESSIVLayerBlockCipher(256)
+	bc2, err := NewAESCTRLayerBlockCipher(256)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	lbco.SymmetricKey = []byte("aaa34567890123456789012345678912")
 
 	ciphertext := make([]byte, 1024)
 	encsize, err := ciphertextReader.Read(ciphertext)
+	if err != io.EOF {
+		t.Fatal("Expected EOF")
+	}
+	ciphertextTestReader := bytes.NewReader(ciphertext[:encsize])
+
+	lbco, err := finalizer()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ciphertextTestReader := bytes.NewReader(ciphertext[:encsize])
+	lbco.Private.SymmetricKey = []byte("aaa34567890123456789012345678912")
 
 	plaintextReader, _, err := bc2.Decrypt(ciphertextTestReader, lbco)
 	if err != nil {
@@ -135,22 +146,27 @@ func TestBlockCipherAesSivEncryptionInvalidKey(t *testing.T) {
 	}
 
 	plaintext := make([]byte, 1024)
+	// first time read may not hit EOF of original source
+	_, _ = plaintextReader.Read(plaintext)
+	// now we must have hit eof and evaluated the plaintext
 	_, err = plaintextReader.Read(plaintext)
 	if err == nil {
 		t.Fatal("Read() should have failed due to wrong key")
 	}
 }
 
-func TestBlockCipherAesSivEncryptionInvalidKeyLength(t *testing.T) {
+func TestBlockCipherAesCtrEncryptionInvalidKeyLength(t *testing.T) {
 	var (
 		symKey = []byte("012345")
 		opt    = LayerBlockCipherOptions{
-			SymmetricKey: symKey,
+			Private: PrivateLayerBlockCipherOptions{
+				SymmetricKey: symKey,
+			},
 		}
 		layerData = []byte("this is some data")
 	)
 
-	bc, err := NewAESSIVLayerBlockCipher(256)
+	bc, err := NewAESCTRLayerBlockCipher(256)
 	if err != nil {
 		t.Fatal(err)
 	}

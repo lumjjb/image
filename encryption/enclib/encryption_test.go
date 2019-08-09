@@ -18,6 +18,7 @@ package enclib
 
 import (
 	"bytes"
+	"io"
 	"reflect"
 	"testing"
 
@@ -100,7 +101,19 @@ func TestEncryptLayer(t *testing.T) {
 
 	dataReader := bytes.NewReader(data)
 
-	encLayerReader, annotations, err := EncryptLayer(ec, dataReader, desc)
+	encLayerReader, encLayerFinalizer, err := EncryptLayer(ec, dataReader, desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	encLayer := make([]byte, 1024)
+	encsize, err := encLayerReader.Read(encLayer)
+	if err != io.EOF {
+		t.Fatal("Expected EOF")
+	}
+	encLayerReaderAt := bytes.NewReader(encLayer[:encsize])
+
+	annotations, err := encLayerFinalizer()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,13 +126,6 @@ func TestEncryptLayer(t *testing.T) {
 		Annotations: annotations,
 	}
 
-	encLayer := make([]byte, 1024)
-	encsize, err := encLayerReader.Read(encLayer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	encLayerReaderAt := bytes.NewReader(encLayer[:encsize])
-
 	decLayerReader, _, err := DecryptLayer(dc, encLayerReaderAt, newDesc, false)
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +133,7 @@ func TestEncryptLayer(t *testing.T) {
 
 	decLayer := make([]byte, 1024)
 	decsize, err := decLayerReader.Read(decLayer)
-	if err != nil {
+	if err != nil && err != io.EOF {
 		t.Fatal(err)
 	}
 

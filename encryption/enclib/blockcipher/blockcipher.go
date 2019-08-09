@@ -28,14 +28,13 @@ type LayerCipherType string
 
 // TODO: Should be obtained from OCI spec once included
 const (
-	AESSIVCMAC256 LayerCipherType = "AEAD_AES_SIV_CMAC_STREAM_256"
-	AESSIVCMAC512 LayerCipherType = "AEAD_AES_SIV_CMAC_STREAM_512"
+	AES256CTR     LayerCipherType = "AES_256_CTR"
 	CipherTypeOpt string          = "type"
 )
 
-// LayerBlockCipherOptions includes the information required to encrypt/decrypt
-// an image
-type LayerBlockCipherOptions struct {
+// PrivateLayerBlockCipherOptions includes the information required to encrypt/decrypt
+// an image which are sensitive and should not be in plaintext
+type PrivateLayerBlockCipherOptions struct {
 	// SymmetricKey represents the symmetric key used for encryption/decryption
 	// This field should be populated by Encrypt/Decrypt calls
 	SymmetricKey []byte `json:"symkey"`
@@ -49,13 +48,29 @@ type LayerBlockCipherOptions struct {
 	CipherOptions map[string][]byte `json:"cipheroptions"`
 }
 
+// PublicLayerBlockCipherOptions includes the information required to encrypt/decrypt
+// an image which are public and can be deduplicated in plaintext across multiple
+// recipients
+type PublicLayerBlockCipherOptions struct {
+	// CipherOptions contains the cipher metadata used for encryption/decryption
+	// This field should be populated by Encrypt/Decrypt calls
+	CipherOptions map[string][]byte `json:"cipheroptions"`
+}
+
+// LayerBlockCipherOptions contains the public and private LayerBlockCipherOptions
+// required to encrypt/decrypt an image
+type LayerBlockCipherOptions struct {
+	Public  PublicLayerBlockCipherOptions
+	Private PrivateLayerBlockCipherOptions
+}
+
 // LayerBlockCipher returns a provider for encrypt/decrypt functionality
 // for handling the layer data for a specific algorithm
 type LayerBlockCipher interface {
 	// GenerateKey creates a symmetric key
-	GenerateKey() []byte
+	GenerateKey() ([]byte, error)
 	// Encrypt takes in layer data and returns the ciphertext and relevant LayerBlockCipherOptions
-	Encrypt(layerDataReader io.Reader, opt LayerBlockCipherOptions) (io.Reader, LayerBlockCipherOptions, error)
+	Encrypt(layerDataReader io.Reader, opt LayerBlockCipherOptions) (io.Reader, Finalizer, error)
 	// Decrypt takes in layer ciphertext data and returns the plaintext and relevant LayerBlockCipherOptions
 	Decrypt(layerDataReader io.Reader, opt LayerBlockCipherOptions) (io.Reader, LayerBlockCipherOptions, error)
 }
@@ -65,25 +80,64 @@ type LayerBlockCipherHandler struct {
 	cipherMap map[LayerCipherType]LayerBlockCipher
 }
 
-// Encrypt is the handler for the layer decryption routine
-func (h *LayerBlockCipherHandler) Encrypt(plainDataReader io.Reader, typ LayerCipherType) (io.Reader, LayerBlockCipherOptions, error) {
+type Finalizer func() (LayerBlockCipherOptions, error)
 
-	if c, ok := h.cipherMap[typ]; ok {
-		opt := LayerBlockCipherOptions{
-			SymmetricKey: c.GenerateKey(),
-		}
-		encDataReader, newopt, err := c.Encrypt(plainDataReader, opt)
-		if err == nil {
-			newopt.CipherOptions[CipherTypeOpt] = []byte(typ)
-		}
-		return encDataReader, newopt, err
+// GetOpt returns the value of the cipher option and if the option exists
+func (lbco LayerBlockCipherOptions) GetOpt(key string) (value []byte, ok bool) {
+	if v, ok := lbco.Public.CipherOptions[key]; ok {
+		return v, ok
+	} else if v, ok := lbco.Private.CipherOptions[key]; ok {
+		return v, ok
+	} else {
+		return nil, false
 	}
-	return nil, LayerBlockCipherOptions{}, errors.Errorf("unsupported cipher type: %s", typ)
+}
+
+// SymmetricKey returns the value of the symmetric key for the cipher
+func (lbco LayerBlockCipherOptions) SymmetricKey() []byte {
+	return lbco.Private.SymmetricKey
+}
+
+// SymmetricKey returns the value of the symmetric key for the cipher
+func (lbco LayerBlockCipherOptions) OriginalDigest() digest.Digest {
+	return lbco.Private.Digest
+}
+
+func wrapFinalizerWithType(fin Finalizer, typ LayerCipherType) Finalizer {
+	return func() (LayerBlockCipherOptions, error) {
+		lbco, err := fin()
+		if err != nil {
+			return LayerBlockCipherOptions{}, err
+		}
+		lbco.Public.CipherOptions[CipherTypeOpt] = []byte(typ)
+		return lbco, err
+	}
+}
+
+// Encrypt is the handler for the layer decryption routine
+func (h *LayerBlockCipherHandler) Encrypt(plainDataReader io.Reader, typ LayerCipherType) (io.Reader, Finalizer, error) {
+	if c, ok := h.cipherMap[typ]; ok {
+		sk, err := c.GenerateKey()
+		if err != nil {
+			return nil, nil, err
+		}
+		opt := LayerBlockCipherOptions{
+			Private: PrivateLayerBlockCipherOptions{
+				SymmetricKey: sk,
+			},
+		}
+		encDataReader, fin, err := c.Encrypt(plainDataReader, opt)
+		if err == nil {
+			fin = wrapFinalizerWithType(fin, typ)
+		}
+		return encDataReader, fin, err
+	}
+	return nil, nil, errors.Errorf("unsupported cipher type: %s", typ)
 }
 
 // Decrypt is the handler for the layer decryption routine
 func (h *LayerBlockCipherHandler) Decrypt(encDataReader io.Reader, opt LayerBlockCipherOptions) (io.Reader, LayerBlockCipherOptions, error) {
-	typ, ok := opt.CipherOptions[CipherTypeOpt]
+	typ, ok := opt.GetOpt(CipherTypeOpt)
 	if !ok {
 		return nil, LayerBlockCipherOptions{}, errors.New("no cipher type provided")
 	}
@@ -100,14 +154,9 @@ func NewLayerBlockCipherHandler() (*LayerBlockCipherHandler, error) {
 	}
 
 	var err error
-	h.cipherMap[AESSIVCMAC256], err = NewAESSIVLayerBlockCipher(256)
+	h.cipherMap[AES256CTR], err = NewAESCTRLayerBlockCipher(256)
 	if err != nil {
-		return nil, errors.Wrap(err, "unable to set up Cipher AES-SIV-CMAC-256")
-	}
-
-	h.cipherMap[AESSIVCMAC512], err = NewAESSIVLayerBlockCipher(512)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to set up Cipher AES-SIV-CMAC-512")
+		return nil, errors.Wrap(err, "unable to set up Cipher AES-256-CTR")
 	}
 
 	return &h, nil
