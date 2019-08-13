@@ -105,6 +105,18 @@ const (
 	Compress
 )
 
+// LayerCrypto indicates if layers have been encrypted or decrypted or none
+type LayerCrypto int
+
+const (
+	// None indicates the layer must be preserved, no encryption/decryption
+	None LayerCrypto = iota
+	// Encrypt indicates the layer is encrypted
+	Encrypt
+	// Decrypt indicates the layer is decrypted
+	Decrypt
+)
+
 // BlobInfo collects known information about a blob (layer/config).
 // In some situations, some fields may be unknown, in others they may be mandatory; documenting an “unknown” value here does not override that.
 type BlobInfo struct {
@@ -121,6 +133,9 @@ type BlobInfo struct {
 	// MIME type for compressed layers (e.g., gzip or zstd). This field MUST be
 	// set when `CompressionOperation == Compress`.
 	CompressionAlgorithm *compression.Algorithm
+	// CryptoOperation is used in Image.UpdateLayerInfos to instruct
+	// whether the original layer was encrypted/decrypted
+	CryptoOperation LayerCrypto
 }
 
 // BICTransportScope encapsulates transport-dependent representation of a “scope” where blobs are or are not present.
