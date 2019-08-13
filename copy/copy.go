@@ -37,6 +37,7 @@ type digestingReader struct {
 	expectedDigest      digest.Digest
 	validationFailed    bool
 	validationSucceeded bool
+	skipValidation      bool
 }
 
 // maxParallelDownloads is used to limit the maxmimum number of parallel
@@ -46,33 +47,40 @@ var maxParallelDownloads = 6
 // newDigestingReader returns an io.Reader implementation with contents of source, which will eventually return a non-EOF error
 // or set validationSucceeded/validationFailed to true if the source stream does/does not match expectedDigest.
 // (neither is set if EOF is never reached).
-func newDigestingReader(source io.Reader, expectedDigest digest.Digest) (*digestingReader, error) {
-	if err := expectedDigest.Validate(); err != nil {
-		return nil, errors.Errorf("Invalid digest specification %s", expectedDigest)
-	}
-	digestAlgorithm := expectedDigest.Algorithm()
-	if !digestAlgorithm.Available() {
-		return nil, errors.Errorf("Invalid digest specification %s: unsupported digest algorithm %s", expectedDigest, digestAlgorithm)
+func newDigestingReader(source io.Reader, expectedDigest digest.Digest, skipValidation bool) (*digestingReader, error) {
+	var digester digest.Digester
+	if !skipValidation {
+		if err := expectedDigest.Validate(); err != nil {
+			return nil, errors.Errorf("Invalid digest specification %s", expectedDigest)
+		}
+		digestAlgorithm := expectedDigest.Algorithm()
+		if !digestAlgorithm.Available() {
+			return nil, errors.Errorf("Invalid digest specification %s: unsupported digest algorithm %s", expectedDigest, digestAlgorithm)
+		}
+		digester = digestAlgorithm.Digester()
 	}
 	return &digestingReader{
 		source:           source,
-		digester:         digestAlgorithm.Digester(),
+		digester:         digester,
 		expectedDigest:   expectedDigest,
 		validationFailed: false,
+		skipValidation:   skipValidation,
 	}, nil
 }
 
 func (d *digestingReader) Read(p []byte) (int, error) {
 	n, err := d.source.Read(p)
-	if n > 0 {
-		if n2, err := d.digester.Hash().Write(p[:n]); n2 != n || err != nil {
-			// Coverage: This should not happen, the hash.Hash interface requires
-			// d.digest.Write to never return an error, and the io.Writer interface
-			// requires n2 == len(input) if no error is returned.
-			return 0, errors.Wrapf(err, "Error updating digest during verification: %d vs. %d", n2, n)
+	if !d.skipValidation {
+		if n > 0 {
+			if n2, err := d.digester.Hash().Write(p[:n]); n2 != n || err != nil {
+				// Coverage: This should not happen, the hash.Hash interface requires
+				// d.digest.Write to never return an error, and the io.Writer interface
+				// requires n2 == len(input) if no error is returned.
+				return 0, errors.Wrapf(err, "Error updating digest during verification: %d vs. %d", n2, n)
+			}
 		}
 	}
-	if err == io.EOF {
+	if err == io.EOF && !d.skipValidation {
 		actualDigest := d.digester.Digest()
 		if actualDigest != d.expectedDigest {
 			d.validationFailed = true
@@ -797,7 +805,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 	// Note that for this check we don't use the stronger "validationSucceeded" indicator, because
 	// dest.PutBlob may detect that the layer already exists, in which case we don't
 	// read stream to the end, and validation does not happen.
-	digestingReader, err := newDigestingReader(srcStream, srcInfo.Digest)
+	digestingReader, err := newDigestingReader(srcStream, srcInfo.Digest, false)
 	if err != nil {
 		return types.BlobInfo{}, errors.Wrapf(err, "Error preparing to verify blob %s", srcInfo.Digest)
 	}
