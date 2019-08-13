@@ -26,6 +26,10 @@ const (
 	DockerV2Schema2LayerMediaType = "application/vnd.docker.image.rootfs.diff.tar.gzip"
 	// DockerV2SchemaLayerMediaTypeUncompressed is the mediaType used for uncompressed layers.
 	DockerV2SchemaLayerMediaTypeUncompressed = "application/vnd.docker.image.rootfs.diff.tar"
+	// DockerV2Schema2LayerGzipEncMediaType is MIME type used for encrypted compressed layers.
+	DockerV2Schema2LayerGzipEncMediaType = "application/vnd.docker.image.rootfs.diff.tar.gzip+enc"
+	// DockerV2Schema2LayerEncMediaType is MIME type used for encrypted layers.
+	DockerV2Schema2LayerEncMediaType = "application/vnd.docker.image.rootfs.diff.tar+enc"
 	// DockerV2ListMediaType MIME type represents Docker manifest schema 2 list
 	DockerV2ListMediaType = "application/vnd.docker.distribution.manifest.list.v2+json"
 	// DockerV2Schema2ForeignLayerMediaType is the MIME type used for schema 2 foreign layers.
