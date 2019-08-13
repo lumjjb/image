@@ -28,7 +28,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/containerd/containerd/errdefs"
 	"github.com/containers/image/encryption/enclib/config"
 	"github.com/containers/image/encryption/enclib/keywrap"
 	"github.com/pkg/errors"
@@ -263,7 +262,7 @@ func (kw *gpgKeyWrapper) createEntityList(ec *config.EncryptConfig) (openpgp.Ent
 	}
 
 	if notFound {
-		return nil, errors.Wrapf(errdefs.ErrNotFound, buffer.String())
+		return nil, errors.New(buffer.String())
 	}
 
 	return filteredList, nil
