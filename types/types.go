@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/containers/image/docker/reference"
-	encconfig "github.com/containers/image/encryption/enclib/config"
+	encconfig "github.com/containers/ocicrypt/config"
 	"github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )

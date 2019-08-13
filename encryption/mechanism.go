@@ -1,7 +1,7 @@
 package encryption
 
 import (
-	encconfig "github.com/containers/image/encryption/enclib/config"
+	encconfig "github.com/containers/ocicrypt/config"
 )
 
 // Mechanism abstracts a way to encrypt images and layers

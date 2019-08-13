@@ -2,7 +2,7 @@ package encryption
 
 /*
 import (
-	"github.com/containers/image/encryption/enclib/config"
+	"github.com/containers/ocicrypt/config"
 	"github.com/pkg/errors"
 )
 

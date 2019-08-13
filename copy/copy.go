@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/containers/image/docker/reference"
-	"github.com/containers/image/encryption/enclib"
-	encconfig "github.com/containers/image/encryption/enclib/config"
 	"github.com/containers/image/image"
 	"github.com/containers/image/manifest"
 	"github.com/containers/image/pkg/blobinfocache"
+	"github.com/containers/ocicrypt"
+	encconfig "github.com/containers/ocicrypt/config"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/containers/image/pkg/compression"
@@ -747,7 +747,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 				Annotations: srcInfo.Annotations,
 			}
 
-			_, _, err := enclib.DecryptLayer(dc, nil, newDesc, true)
+			_, _, err := ocicrypt.DecryptLayer(dc, nil, newDesc, true)
 			if err != nil {
 				return types.BlobInfo{}, "", errors.Wrapf(err, "Image authentication failed for the digest %+v", srcInfo.Digest)
 			}
@@ -902,7 +902,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		}
 
 		var d digest.Digest
-		srcStream, d, err = enclib.DecryptLayer(dc, srcStream, newDesc, false)
+		srcStream, d, err = ocicrypt.DecryptLayer(dc, srcStream, newDesc, false)
 		if err != nil {
 			return types.BlobInfo{}, errors.Wrapf(err, "Error decrypting layer %s", srcInfo.Digest)
 		}
@@ -982,7 +982,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 	var (
 		encryptMediaType string
 		encrypted        bool
-		finalizer        enclib.EncryptLayerFinalizer
+		finalizer        ocicrypt.EncryptLayerFinalizer
 	)
 	if toEncrypt {
 		switch srcInfo.MediaType {
@@ -1004,7 +1004,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 				Annotations: annotations,
 			}
 
-			s, fin, err := enclib.EncryptLayer(c.encryptConfig, destStream, desc)
+			s, fin, err := ocicrypt.EncryptLayer(c.encryptConfig, destStream, desc)
 			if err != nil {
 				return types.BlobInfo{}, errors.Wrapf(err, "Image encryption failed for the digest %+v", srcInfo.Digest)
 			}
