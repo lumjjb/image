@@ -26,7 +26,7 @@ func TestNewDigestingReader(t *testing.T) {
 		"sha256:0",        // Invalid hex value
 		"sha256:01",       // Invalid length of hex value
 	} {
-		_, err := newDigestingReader(source, input)
+		_, err := newDigestingReader(source, input, false)
 		assert.Error(t, err, input.String())
 	}
 }
@@ -43,7 +43,7 @@ func TestDigestingReaderRead(t *testing.T) {
 	// Valid input
 	for _, c := range cases {
 		source := bytes.NewReader(c.input)
-		reader, err := newDigestingReader(source, c.digest)
+		reader, err := newDigestingReader(source, c.digest, false)
 		require.NoError(t, err, c.digest.String())
 		dest := bytes.Buffer{}
 		n, err := io.Copy(&dest, reader)
@@ -56,7 +56,7 @@ func TestDigestingReaderRead(t *testing.T) {
 	// Modified input
 	for _, c := range cases {
 		source := bytes.NewReader(bytes.Join([][]byte{c.input, []byte("x")}, nil))
-		reader, err := newDigestingReader(source, c.digest)
+		reader, err := newDigestingReader(source, c.digest, false)
 		require.NoError(t, err, c.digest.String())
 		dest := bytes.Buffer{}
 		_, err = io.Copy(&dest, reader)
@@ -67,7 +67,7 @@ func TestDigestingReaderRead(t *testing.T) {
 	// Truncated input
 	for _, c := range cases {
 		source := bytes.NewReader(c.input)
-		reader, err := newDigestingReader(source, c.digest)
+		reader, err := newDigestingReader(source, c.digest, false)
 		require.NoError(t, err, c.digest.String())
 		if len(c.input) != 0 {
 			dest := bytes.Buffer{}
