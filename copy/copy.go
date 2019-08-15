@@ -43,6 +43,11 @@ type digestingReader struct {
 	skipValidation      bool
 }
 
+var (
+	// ErrDecryptParamsMissing is returned if there is missing decryption parameters
+	ErrDecryptParamsMissing = errors.New("Necessary DecryptParameters not present")
+)
+
 // maxParallelDownloads is used to limit the maxmimum number of parallel
 // downloads.  Let's follow Firefox by limiting it to 6.
 var maxParallelDownloads = 6
@@ -262,7 +267,7 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 		return nil, errors.Wrapf(err, "Error initializing image from source %s", transports.ImageName(c.rawSource.Reference()))
 	}
 
-	if err = src.SupportsEncryption(ctx); err != nil && options.EncryptLayers != nil {
+	if !src.SupportsEncryption(ctx) && options.EncryptLayers != nil {
 		return nil, errors.Wrap(err, "Encryption requested but not supported by source image type")
 	}
 
@@ -855,7 +860,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		srcInfo.MediaType == manifest.DockerV2Schema2LayerEncMediaType {
 
 		if c.decryptConfig == nil {
-			return types.BlobInfo{}, errors.New("Necessary DecryptParameters not present")
+			return types.BlobInfo{}, ErrDecryptParamsMissing
 		}
 
 		dc := c.decryptConfig
