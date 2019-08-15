@@ -201,7 +201,7 @@ func (m *manifestSchema1) convertToManifestSchema2(uploadedLayerInfos []types.Bl
 	return manifestSchema2FromComponents(configDescriptor, nil, configJSON, layers), nil
 }
 
-// SupportsEncryption returns an error if encryption is not supported for the manifest type
-func (m *manifestSchema1) SupportsEncryption(context.Context) error {
-	return errors.New("Docker Schema v1 does not support encryption")
+// SupportsEncryption returns if encryption is supported for the manifest type
+func (m *manifestSchema1) SupportsEncryption(context.Context) bool {
+	return false
 }
