@@ -19,6 +19,7 @@ import (
 	"github.com/containers/image/pkg/blobinfocache"
 	"github.com/containers/ocicrypt"
 	encconfig "github.com/containers/ocicrypt/config"
+	ociencspec "github.com/containers/ocicrypt/spec"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/containers/image/pkg/compression"
@@ -41,24 +42,24 @@ type digestingReader struct {
 	expectedDigest      digest.Digest
 	validationFailed    bool
 	validationSucceeded bool
-	skipValidation      bool
+	validateDigests     bool
 }
 
 var (
 	// ErrDecryptParamsMissing is returned if there is missing decryption parameters
 	ErrDecryptParamsMissing = errors.New("Necessary DecryptParameters not present")
-)
 
-// maxParallelDownloads is used to limit the maxmimum number of parallel
-// downloads.  Let's follow Firefox by limiting it to 6.
-var maxParallelDownloads = 6
+	// maxParallelDownloads is used to limit the maxmimum number of parallel
+	// downloads.  Let's follow Firefox by limiting it to 6.
+	maxParallelDownloads = 6
+)
 
 // newDigestingReader returns an io.Reader implementation with contents of source, which will eventually return a non-EOF error
 // or set validationSucceeded/validationFailed to true if the source stream does/does not match expectedDigest.
 // (neither is set if EOF is never reached).
-func newDigestingReader(source io.Reader, expectedDigest digest.Digest, skipValidation bool) (*digestingReader, error) {
+func newDigestingReader(source io.Reader, expectedDigest digest.Digest, validateDigests bool) (*digestingReader, error) {
 	var digester digest.Digester
-	if !skipValidation {
+	if validateDigests {
 		if err := expectedDigest.Validate(); err != nil {
 			return nil, errors.Errorf("Invalid digest specification %s", expectedDigest)
 		}
@@ -73,13 +74,13 @@ func newDigestingReader(source io.Reader, expectedDigest digest.Digest, skipVali
 		digester:         digester,
 		expectedDigest:   expectedDigest,
 		validationFailed: false,
-		skipValidation:   skipValidation,
+		validateDigests:  validateDigests,
 	}, nil
 }
 
 func (d *digestingReader) Read(p []byte) (int, error) {
 	n, err := d.source.Read(p)
-	if !d.skipValidation {
+	if d.validateDigests {
 		if n > 0 {
 			if n2, err := d.digester.Hash().Write(p[:n]); n2 != n || err != nil {
 				// Coverage: This should not happen, the hash.Hash interface requires
@@ -89,7 +90,7 @@ func (d *digestingReader) Read(p []byte) (int, error) {
 			}
 		}
 	}
-	if err == io.EOF && !d.skipValidation {
+	if err == io.EOF && d.validateDigests {
 		actualDigest := d.digester.Digest()
 		if actualDigest != d.expectedDigest {
 			d.validationFailed = true
@@ -141,11 +142,14 @@ type Options struct {
 	// manifest MIME type of image set by user. "" is default and means use the autodetection to the the manifest MIME type
 	ForceManifestMIMEType string
 	CheckAuthorization    bool
-	// If non-nil indicates that image should be encrypted.
+	// If EncryptConfig is non-nil, it indicates that an image should be encrypted.
+	// The encryption options is derived from the construction of EncryptConfig object.
 	EncryptConfig *encconfig.EncryptConfig
 	// EncryptLayers represents the list of layers to encrypt.
-	// If nil, don't encrypt any layers
+	// If nil, don't encrypt any layers.
 	// If non-nil and len==0, denotes encrypt all layers.
+	// integers in the slice represent 0-indexed layer indices, with support for negative
+	// indexing. i.e. 0 is the first layer, -1 is the last (top-most) layer.
 	EncryptLayers *[]int
 }
 
@@ -316,11 +320,9 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 
 	// Set up encryption structs
 	var (
-		//ec *encconfig.EncryptConfig
 		dc *encconfig.DecryptConfig
 	)
 	if options.SourceCtx.CryptoConfig != nil {
-		//ec = options.SourceCtx.CryptoConfig.EncryptConfig
 		dc = options.SourceCtx.CryptoConfig.DecryptConfig
 	}
 
@@ -542,13 +544,18 @@ func (ic *imageCopier) copyLayers(ctx context.Context) error {
 	// Create layer Encryption map
 	encLayerBitmap := map[int]bool{}
 	var encryptAll bool
-	encryptLayers := ic.encryptLayers != nil
 	if ic.encryptLayers != nil {
 		encryptAll = len(*ic.encryptLayers) == 0
 		totalLayers := len(srcInfos)
 		for _, l := range *ic.encryptLayers {
 			// if layer is negative, it is reverse indexed.
 			encLayerBitmap[(totalLayers+l)%totalLayers] = true
+		}
+
+		if encryptAll {
+			for i := 0; i < len(srcInfos); i++ {
+				encLayerBitmap[i] = true
+			}
 		}
 	}
 
@@ -558,8 +565,7 @@ func (ic *imageCopier) copyLayers(ctx context.Context) error {
 
 		for i, srcLayer := range srcInfos {
 			copySemaphore.Acquire(ctx, 1)
-			toEncrypt := encryptLayers && (encryptAll || encLayerBitmap[i])
-			go copyLayerHelper(i, srcLayer, toEncrypt, progressPool)
+			go copyLayerHelper(i, srcLayer, encLayerBitmap[i], progressPool)
 		}
 
 		// Wait for all layers to be copied
@@ -739,20 +745,18 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 	// the symmetric key with the provided private keys. If we fail, we will
 	// not allow the image to be provisioned.
 	if ic.checkAuthorization {
-		if srcInfo.MediaType == manifest.DockerV2Schema2LayerGzipEncMediaType ||
-			srcInfo.MediaType == manifest.DockerV2Schema2LayerEncMediaType {
+		if srcInfo.MediaType == ociencspec.MediaTypeLayerGzipEnc ||
+			srcInfo.MediaType == ociencspec.MediaTypeLayerEnc {
 
 			if ic.decryptConfig == nil {
 				return types.BlobInfo{}, "", errors.New("Necessary DecryptParameters not present")
 			}
 
-			dc := ic.decryptConfig
-
 			newDesc := ocispec.Descriptor{
 				Annotations: srcInfo.Annotations,
 			}
 
-			_, _, err := ocicrypt.DecryptLayer(dc, nil, newDesc, true)
+			_, _, err := ocicrypt.DecryptLayer(ic.decryptConfig, nil, newDesc, true)
 			if err != nil {
 				return types.BlobInfo{}, "", errors.Wrapf(err, "Image authentication failed for the digest %+v", srcInfo.Digest)
 			}
@@ -760,7 +764,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 	}
 
 	cachedDiffID := ic.c.blobInfoCache.UncompressedDigest(srcInfo.Digest) // May be ""
-    // Diffs are needed if we are encrypting an image
+	// Diffs are needed if we are encrypting an image
 	diffIDIsNeeded := ic.diffIDsAreNeeded && cachedDiffID == "" || ic.encryptConfig != nil
 
 	// If we already have the blob, and we don't need to compute the diffID, then we don't need to read it from the source.
@@ -894,21 +898,19 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 
 	var decrypted bool
 	var err error
-	if srcInfo.MediaType == manifest.DockerV2Schema2LayerGzipEncMediaType ||
-		srcInfo.MediaType == manifest.DockerV2Schema2LayerEncMediaType {
+	if srcInfo.MediaType == ociencspec.MediaTypeLayerGzipEnc ||
+		srcInfo.MediaType == ociencspec.MediaTypeLayerEnc {
 
 		if c.decryptConfig == nil {
 			return types.BlobInfo{}, ErrDecryptParamsMissing
 		}
-
-		dc := c.decryptConfig
 
 		newDesc := ocispec.Descriptor{
 			Annotations: srcInfo.Annotations,
 		}
 
 		var d digest.Digest
-		srcStream, d, err = ocicrypt.DecryptLayer(dc, srcStream, newDesc, false)
+		srcStream, d, err = ocicrypt.DecryptLayer(c.decryptConfig, srcStream, newDesc, false)
 		if err != nil {
 			return types.BlobInfo{}, errors.Wrapf(err, "Error decrypting layer %s", srcInfo.Digest)
 		}
@@ -916,17 +918,17 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		srcInfo.Digest = d
 		srcInfo.Size = -1
 		switch srcInfo.MediaType {
-		case manifest.DockerV2Schema2LayerGzipEncMediaType:
+		case ociencspec.MediaTypeLayerGzipEnc:
 			srcInfo.MediaType = ocispec.MediaTypeImageLayerGzip
-		case manifest.DockerV2Schema2LayerEncMediaType:
+		case ociencspec.MediaTypeLayerEnc:
 			srcInfo.MediaType = ocispec.MediaTypeImageLayer
 		}
 		decrypted = true
 	}
 
-	skipDigestValidation := srcInfo.Digest == ""
+	validateDigest := srcInfo.Digest != ""
 
-	digestingReader, err := newDigestingReader(srcStream, srcInfo.Digest, skipDigestValidation)
+	digestingReader, err := newDigestingReader(srcStream, srcInfo.Digest, validateDigest)
 	if err != nil {
 		return types.BlobInfo{}, errors.Wrapf(err, "Error preparing to verify blob %s", srcInfo.Digest)
 	}
@@ -993,9 +995,9 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 	if toEncrypt {
 		switch srcInfo.MediaType {
 		case manifest.DockerV2Schema2LayerMediaType, ocispec.MediaTypeImageLayerGzip:
-			encryptMediaType = manifest.DockerV2Schema2LayerGzipEncMediaType
+			encryptMediaType = ociencspec.MediaTypeLayerGzipEnc
 		case ocispec.MediaTypeImageLayer:
-			encryptMediaType = manifest.DockerV2Schema2LayerEncMediaType
+			encryptMediaType = ociencspec.MediaTypeLayerEnc
 		}
 
 		if encryptMediaType != "" && c.encryptConfig != nil {
