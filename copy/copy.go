@@ -145,10 +145,17 @@ type Options struct {
 	Progress         chan types.ProgressProperties // Reported to when ProgressInterval has arrived for a single artifact+offset.
 	// manifest MIME type of image set by user. "" is default and means use the autodetection to the the manifest MIME type
 	ForceManifestMIMEType string
-	CheckAuthorization    bool
+	// CheckAuthorization is an indication if the image does not need to be decrypted, but only
+	// requires checking if the it can be decrypted.
+	// This is an optimization for cached images to see if provided keys have the authorization
+	// to use the cached content without having to decrypt the layers again.
+	CheckAuthorization bool
 	// If EncryptConfig is non-nil, it indicates that an image should be encrypted.
 	// The encryption options is derived from the construction of EncryptConfig object.
+	// Note: During initial encryption process of a layer, the resultant digest is not known
+	// during creation, so newDigestingReader has to be set with validateDigest = false
 	EncryptConfig *encconfig.EncryptConfig
+
 	// EncryptLayers represents the list of layers to encrypt.
 	// If nil, don't encrypt any layers.
 	// If non-nil and len==0, denotes encrypt all layers.
@@ -291,7 +298,7 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 		return nil, errors.Wrapf(err, "Error initializing image from source %s", transports.ImageName(c.rawSource.Reference()))
 	}
 
-	if !src.SupportsEncryption(ctx) && options.EncryptLayers != nil {
+	if options.EncryptLayers != nil && !src.SupportsEncryption(ctx) {
 		return nil, errors.Wrap(err, "Encryption requested but not supported by source image type")
 	}
 
@@ -338,9 +345,8 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 	}
 
 	// Set up encryption structs
-	var (
-		dc *encconfig.DecryptConfig
-	)
+	var dc *encconfig.DecryptConfig
+
 	if options.SourceCtx.CryptoConfig != nil {
 		dc = options.SourceCtx.CryptoConfig.DecryptConfig
 	}
@@ -768,7 +774,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 			srcInfo.MediaType == ociencspec.MediaTypeLayerEnc {
 
 			if ic.decryptConfig == nil {
-				return types.BlobInfo{}, "", errors.New("Necessary DecryptParameters not present")
+				return types.BlobInfo{}, "", errors.New("image authentication failed: layer is encrypted, but no decryption key materials were provided")
 			}
 
 			newDesc := ocispec.Descriptor{
@@ -777,7 +783,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 
 			_, _, err := ocicrypt.DecryptLayer(ic.decryptConfig, nil, newDesc, true)
 			if err != nil {
-				return types.BlobInfo{}, "", errors.Wrapf(err, "Image authentication failed for the digest %+v", srcInfo.Digest)
+				return types.BlobInfo{}, "", errors.Wrapf(err, "image authentication failed for the digest %+v", srcInfo.Digest)
 			}
 		}
 	}
@@ -1040,6 +1046,9 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 			encryptMediaType = ociencspec.MediaTypeLayerGzipEnc
 		case ocispec.MediaTypeImageLayer:
 			encryptMediaType = ociencspec.MediaTypeLayerEnc
+		default:
+			return types.BlobInfo{}, errors.Errorf("Requested encryption but mediatype: %v is not valid for encryption", srcInfo.MediaType)
+
 		}
 
 		if encryptMediaType != "" && c.encryptConfig != nil {
