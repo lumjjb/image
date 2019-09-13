@@ -770,9 +770,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 	// the symmetric key with the provided private keys. If we fail, we will
 	// not allow the image to be provisioned.
 	if ic.checkAuthorization {
-		if srcInfo.MediaType == ociencspec.MediaTypeLayerGzipEnc ||
-			srcInfo.MediaType == ociencspec.MediaTypeLayerEnc {
-
+		if isEncryptedLayer(srcInfo) {
 			if ic.decryptConfig == nil {
 				return types.BlobInfo{}, "", errors.New("image authentication failed: layer is encrypted, but no decryption key materials were provided")
 			}
@@ -923,9 +921,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 
 	var decrypted bool
 	var err error
-	if srcInfo.MediaType == ociencspec.MediaTypeLayerGzipEnc ||
-		srcInfo.MediaType == ociencspec.MediaTypeLayerEnc {
-
+	if isEncryptedLayer(srcInfo) {
 		if c.decryptConfig == nil {
 			return types.BlobInfo{}, ErrDecryptParamsMissing
 		}
@@ -942,12 +938,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 
 		srcInfo.Digest = d
 		srcInfo.Size = -1
-		switch srcInfo.MediaType {
-		case ociencspec.MediaTypeLayerGzipEnc:
-			srcInfo.MediaType = ocispec.MediaTypeImageLayerGzip
-		case ociencspec.MediaTypeLayerEnc:
-			srcInfo.MediaType = ocispec.MediaTypeImageLayer
-		}
+		srcInfo.MediaType = getDecryptedMediaType(srcInfo)
 		decrypted = true
 	}
 
@@ -1041,15 +1032,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		finalizer        ocicrypt.EncryptLayerFinalizer
 	)
 	if toEncrypt {
-		switch srcInfo.MediaType {
-		case manifest.DockerV2Schema2LayerMediaType, ocispec.MediaTypeImageLayerGzip:
-			encryptMediaType = ociencspec.MediaTypeLayerGzipEnc
-		case ocispec.MediaTypeImageLayer:
-			encryptMediaType = ociencspec.MediaTypeLayerEnc
-		default:
-			return types.BlobInfo{}, errors.Errorf("Requested encryption but mediatype: %v is not valid for encryption", srcInfo.MediaType)
-
-		}
+		srcInfo.MediaType = getDecryptedMediaType(srcInfo)
 
 		if encryptMediaType != "" && c.encryptConfig != nil {
 			var annotations map[string]string
@@ -1169,4 +1152,22 @@ func (c *copier) compressGoroutine(dest *io.PipeWriter, src io.Reader, compressi
 	buf := make([]byte, compressionBufferSize)
 
 	_, err = io.CopyBuffer(compressor, src, buf) // Sets err to nil, i.e. causes dest.Close()
+}
+
+// isEncryptedLayer indicates whether the blob is is encrypted
+func isEncryptedLayer(b types.BlobInfo) bool {
+	return b.MediaType == ociencspec.MediaTypeLayerGzipEnc ||
+		b.MediaType == ociencspec.MediaTypeLayerEnc
+}
+
+// getDecryptedMediaType will set the mediatype to its decrypted counterpart and return
+// an error if the mediatype does not support encryption
+func getDecryptedMediaType(b types.BlobInfo) string {
+	switch b.MediaType {
+	case manifest.DockerV2Schema2LayerMediaType, ocispec.MediaTypeImageLayerGzip:
+		return ociencspec.MediaTypeLayerGzipEnc
+	case ocispec.MediaTypeImageLayer:
+		return ociencspec.MediaTypeLayerEnc
+	}
+	return ""
 }
