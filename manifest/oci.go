@@ -6,6 +6,7 @@ import (
 
 	"github.com/containers/image/v4/pkg/compression"
 	"github.com/containers/image/v4/types"
+	ociencspec "github.com/containers/ocicrypt/spec"
 	"github.com/opencontainers/go-digest"
 	"github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -33,7 +34,7 @@ type OCI1 struct {
 // SupportedOCI1MediaType checks if the specified string is a supported OCI1 media type.
 func SupportedOCI1MediaType(m string) error {
 	switch m {
-	case imgspecv1.MediaTypeDescriptor, imgspecv1.MediaTypeImageConfig, imgspecv1.MediaTypeImageLayer, imgspecv1.MediaTypeImageLayerGzip, imgspecv1.MediaTypeImageLayerNonDistributable, imgspecv1.MediaTypeImageLayerNonDistributableGzip, imgspecv1.MediaTypeImageLayerNonDistributableZstd, imgspecv1.MediaTypeImageLayerZstd, imgspecv1.MediaTypeImageManifest, imgspecv1.MediaTypeLayoutHeader:
+	case imgspecv1.MediaTypeDescriptor, imgspecv1.MediaTypeImageConfig, imgspecv1.MediaTypeImageLayer, imgspecv1.MediaTypeImageLayerGzip, imgspecv1.MediaTypeImageLayerNonDistributable, imgspecv1.MediaTypeImageLayerNonDistributableGzip, imgspecv1.MediaTypeImageLayerNonDistributableZstd, imgspecv1.MediaTypeImageLayerZstd, imgspecv1.MediaTypeImageManifest, imgspecv1.MediaTypeLayoutHeader, ociencspec.MediaTypeLayerEnc, ociencspec.MediaTypeLayerGzipEnc:
 		return nil
 	default:
 		return fmt.Errorf("unsupported OCIv1 media type: %q", m)
@@ -130,6 +131,15 @@ func (m *OCI1) UpdateLayerInfos(layerInfos []types.BlobInfo) error {
 			return fmt.Errorf("Error preparing updated manifest: unknown media type of original layer: %q", original[i].MediaType)
 		}
 
+		origMediaType := original[i].MediaType
+		if info.CryptoOperation == types.Decrypt {
+			var err error
+			origMediaType, err = GetDecryptedMediaType(origMediaType)
+			if err != nil {
+				return fmt.Errorf("error preparing updated manifest: decryption specified but no counterpart for mediatype: %q", original[i].MediaType)
+			}
+		}
+
 		// Set the correct media types based on the specified compression
 		// operation, the desired compression algorithm AND the original media
 		// type.
@@ -142,7 +152,7 @@ func (m *OCI1) UpdateLayerInfos(layerInfos []types.BlobInfo) error {
 		switch info.CompressionOperation {
 		case types.PreserveOriginal:
 			// Keep the original media type.
-			m.Layers[i].MediaType = original[i].MediaType
+			m.Layers[i].MediaType = origMediaType
 
 		case types.Decompress:
 			// Decompress the original media type and check if it was
@@ -160,7 +170,7 @@ func (m *OCI1) UpdateLayerInfos(layerInfos []types.BlobInfo) error {
 		case types.Compress:
 			if info.CompressionAlgorithm == nil {
 				logrus.Debugf("Error preparing updated manifest: blob %q was compressed but does not specify by which algorithm: falling back to use the original blob", info.Digest)
-				m.Layers[i].MediaType = original[i].MediaType
+				m.Layers[i].MediaType = origMediaType
 				break
 			}
 			// Compress the original media type and set the new one based on
@@ -195,6 +205,15 @@ func (m *OCI1) UpdateLayerInfos(layerInfos []types.BlobInfo) error {
 		default:
 			return fmt.Errorf("Error preparing updated manifest: unknown compression operation (%d) for layer %q", info.CompressionOperation, info.Digest)
 		}
+
+		if info.CryptoOperation == types.Encrypt {
+			encMediaType, err := GetEncryptedMediaType(m.Layers[i].MediaType)
+			if err != nil {
+				return fmt.Errorf("error preparing updated manifest: encryption specified but no counterpart for mediatype: %q", m.Layers[i].MediaType)
+			}
+			m.Layers[i].MediaType = encMediaType
+		}
+
 		// TODO: Add decrypt/encrypt mediatype processing before/after compression.
 		m.Layers[i].Digest = info.Digest
 		m.Layers[i].Size = info.Size
@@ -241,4 +260,34 @@ func (m *OCI1) ImageID([]digest.Digest) (string, error) {
 		return "", err
 	}
 	return m.Config.Digest.Hex(), nil
+}
+
+// IsEncryptedLayer indicates whether the blob is is encrypted
+func IsEncryptedLayer(b types.BlobInfo) bool {
+	return b.MediaType == ociencspec.MediaTypeLayerGzipEnc ||
+		b.MediaType == ociencspec.MediaTypeLayerEnc
+}
+
+// GetEncryptedMediaType will return the mediatype to its encrypted counterpart and return
+// an error if the mediatype does not support encryption
+func GetEncryptedMediaType(mediatype string) (string, error) {
+	switch mediatype {
+	case DockerV2Schema2LayerMediaType, imgspecv1.MediaTypeImageLayerGzip:
+		return ociencspec.MediaTypeLayerGzipEnc, nil
+	case imgspecv1.MediaTypeImageLayer:
+		return ociencspec.MediaTypeLayerEnc, nil
+	}
+	return "", errors.Errorf("unsupported mediatype to encrypt: %v", mediatype)
+}
+
+// GetDecryptedMediaType will return the mediatype to its decrypted counterpart and return
+// an error if the mediatype does not support encryption
+func GetDecryptedMediaType(mediatype string) (string, error) {
+	switch mediatype {
+	case ociencspec.MediaTypeLayerGzipEnc:
+		return imgspecv1.MediaTypeImageLayerGzip, nil
+	case ociencspec.MediaTypeLayerEnc:
+		return imgspecv1.MediaTypeImageLayer, nil
+	}
+	return "", errors.Errorf("unsupported mediatype to decrypt: %v", mediatype)
 }
