@@ -346,7 +346,7 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 	// Set up encryption structs
 	var dc *encconfig.DecryptConfig
 
-	if options.SourceCtx.CryptoConfig != nil {
+	if options.SourceCtx != nil && options.SourceCtx.CryptoConfig != nil {
 		dc = options.SourceCtx.CryptoConfig.DecryptConfig
 	}
 
