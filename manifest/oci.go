@@ -131,15 +131,6 @@ func (m *OCI1) UpdateLayerInfos(layerInfos []types.BlobInfo) error {
 			return fmt.Errorf("Error preparing updated manifest: unknown media type of original layer: %q", original[i].MediaType)
 		}
 
-		origMediaType := original[i].MediaType
-		if info.CryptoOperation == types.Decrypt {
-			var err error
-			origMediaType, err = GetDecryptedMediaType(origMediaType)
-			if err != nil {
-				return fmt.Errorf("error preparing updated manifest: decryption specified but no counterpart for mediatype: %q", original[i].MediaType)
-			}
-		}
-
 		// Set the correct media types based on the specified compression
 		// operation, the desired compression algorithm AND the original media
 		// type.
@@ -152,7 +143,7 @@ func (m *OCI1) UpdateLayerInfos(layerInfos []types.BlobInfo) error {
 		switch info.CompressionOperation {
 		case types.PreserveOriginal:
 			// Keep the original media type.
-			m.Layers[i].MediaType = origMediaType
+			m.Layers[i].MediaType = original[i].MediaType
 
 		case types.Decompress:
 			// Decompress the original media type and check if it was
@@ -170,7 +161,7 @@ func (m *OCI1) UpdateLayerInfos(layerInfos []types.BlobInfo) error {
 		case types.Compress:
 			if info.CompressionAlgorithm == nil {
 				logrus.Debugf("Error preparing updated manifest: blob %q was compressed but does not specify by which algorithm: falling back to use the original blob", info.Digest)
-				m.Layers[i].MediaType = origMediaType
+				m.Layers[i].MediaType = original[i].MediaType
 				break
 			}
 			// Compress the original media type and set the new one based on
@@ -214,7 +205,6 @@ func (m *OCI1) UpdateLayerInfos(layerInfos []types.BlobInfo) error {
 			m.Layers[i].MediaType = encMediaType
 		}
 
-		// TODO: Add decrypt/encrypt mediatype processing before/after compression.
 		m.Layers[i].Digest = info.Digest
 		m.Layers[i].Size = info.Size
 		m.Layers[i].Annotations = info.Annotations

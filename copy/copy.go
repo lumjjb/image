@@ -521,12 +521,15 @@ func (ic *imageCopier) copyLayers(ctx context.Context) error {
 		return err
 	}
 	srcInfosUpdated := false
-	if updatedSrcInfos != nil && !reflect.DeepEqual(srcInfos, updatedSrcInfos) {
-		if !ic.canModifyManifest {
-			return errors.Errorf("Internal error: copyLayers() needs to use an updated manifest but that was known to be forbidden")
+	// If we only need to check authorization, no updates required.
+	if !ic.checkAuthorization {
+		if updatedSrcInfos != nil && !reflect.DeepEqual(srcInfos, updatedSrcInfos) {
+			if !ic.canModifyManifest {
+				return errors.Errorf("Internal error: copyLayers() needs to use an updated manifest but that was known to be forbidden")
+			}
+			srcInfos = updatedSrcInfos
+			srcInfosUpdated = true
 		}
-		srcInfos = updatedSrcInfos
-		srcInfosUpdated = true
 	}
 
 	type copyLayerData struct {
@@ -608,6 +611,11 @@ func (ic *imageCopier) copyLayers(ctx context.Context) error {
 		}
 		destInfos[i] = cld.destInfo
 		diffIDs[i] = cld.diffID
+	}
+
+	// If we only need to check authorization, no updates required.
+	if ic.checkAuthorization {
+		return nil
 	}
 
 	ic.manifestUpdates.InformationOnly.LayerInfos = destInfos
@@ -787,6 +795,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 				return types.BlobInfo{}, "", errors.Wrapf(err, "image authentication failed for the digest %+v", srcInfo.Digest)
 			}
 		}
+		return types.BlobInfo{}, "", nil
 	}
 
 	cachedDiffID := ic.c.blobInfoCache.UncompressedDigest(srcInfo.Digest) // May be ""
@@ -941,11 +950,6 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 
 		srcInfo.Digest = d
 		srcInfo.Size = -1
-		// TODO: Check if this is needed
-		srcInfo.MediaType, err = manifest.GetDecryptedMediaType(srcInfo.MediaType)
-		if err != nil {
-			return types.BlobInfo{}, errors.Wrapf(err, "Error decrypting layer %s", srcInfo.Digest)
-		}
 		decrypted = true
 	}
 
@@ -1028,9 +1032,6 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		compressionOperation = types.PreserveOriginal
 		inputInfo = srcInfo
 	}
-	if decrypted {
-		inputInfo.MediaType = srcInfo.MediaType
-	}
 
 	// Perform image encryption for valid mediatypes if encryptConfig provided
 	var (
@@ -1096,6 +1097,16 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 	}
 	if decrypted {
 		uploadedInfo.CryptoOperation = types.Decrypt
+
+		// Ensure that encryption annotations are present in the new manifest
+		// to enable check authorization at a later time.
+		// TODO: Copy over only encryption related annotations
+		if uploadedInfo.Annotations == nil {
+			uploadedInfo.Annotations = map[string]string{}
+		}
+		for k, v := range srcInfo.Annotations {
+			uploadedInfo.Annotations[k] = v
+		}
 	}
 	if encrypted {
 		encryptAnnotations, err := finalizer()
