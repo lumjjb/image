@@ -592,7 +592,7 @@ func (ic *imageCopier) copyLayers(ctx context.Context) error {
 
 	for i, srcLayer := range srcInfos {
 		copySemaphore.Acquire(ctx, 1)
-        toEncrypt := encryptLayers && (encryptAll || encLayerBitmap[i])
+		toEncrypt := encryptLayers && (encryptAll || encLayerBitmap[i])
 		go copyLayerHelper(i, srcLayer, toEncrypt, progressBars[i])
 	}
 
@@ -709,9 +709,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 	// the symmetric key with the provided private keys. If we fail, we will
 	// not allow the image to be provisioned.
 	if ic.checkAuthorization {
-		if srcInfo.MediaType == manifest.DockerV2Schema2LayerGzipEncMediaType ||
-			srcInfo.MediaType == manifest.DockerV2Schema2LayerEncMediaType {
-
+		if manifest.IsEncryptedLayer(srcInfo) {
 			if ic.decryptConfig == nil {
 				return types.BlobInfo{}, "", errors.New("Necessary DecryptParameters not present")
 			}
@@ -730,7 +728,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 	}
 
 	cachedDiffID := ic.c.blobInfoCache.UncompressedDigest(srcInfo.Digest) // May be ""
-    // Diffs are needed if we are encrypting an image
+	// Diffs are needed if we are encrypting an image
 	diffIDIsNeeded := ic.diffIDsAreNeeded && cachedDiffID == "" || ic.encryptConfig != nil
 
 	// If we already have the blob, and we don't need to compute the diffID, then we don't need to read it from the source.
@@ -781,7 +779,7 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 // it copies a blob with srcInfo (with known Digest and possibly known Size) from srcStream to dest,
 // perhaps compressing the stream if canCompress,
 // and returns a complete blobInfo of the copied blob and perhaps a <-chan diffIDResult if diffIDIsNeeded, to be read by the caller.
-func (ic *imageCopier) copyLayerFromStream(ctx context.Context, srcStream io.Reader, srcInfo types.BlobInfo,diffIDIsNeeded bool, toEncrypt bool, bar *pb.ProgressBar) (types.BlobInfo, <-chan diffIDResult, error) {
+func (ic *imageCopier) copyLayerFromStream(ctx context.Context, srcStream io.Reader, srcInfo types.BlobInfo, diffIDIsNeeded bool, toEncrypt bool, bar *pb.ProgressBar) (types.BlobInfo, <-chan diffIDResult, error) {
 	var getDiffIDRecorder func(compression.DecompressorFunc) io.Writer // = nil
 	var diffIDChan chan diffIDResult
 
@@ -857,9 +855,7 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 
 	var decrypted bool
 	var err error
-	if srcInfo.MediaType == manifest.DockerV2Schema2LayerGzipEncMediaType ||
-		srcInfo.MediaType == manifest.DockerV2Schema2LayerEncMediaType {
-
+	if manifest.IsEncryptedLayer(srcInfo) {
 		if c.decryptConfig == nil {
 			return types.BlobInfo{}, ErrDecryptParamsMissing
 		}
@@ -878,12 +874,6 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 
 		srcInfo.Digest = d
 		srcInfo.Size = -1
-		switch srcInfo.MediaType {
-		case manifest.DockerV2Schema2LayerGzipEncMediaType:
-			srcInfo.MediaType = ocispec.MediaTypeImageLayerGzip
-		case manifest.DockerV2Schema2LayerEncMediaType:
-			srcInfo.MediaType = ocispec.MediaTypeImageLayer
-		}
 		decrypted = true
 	}
 
@@ -954,11 +944,9 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 		finalizer        ocicrypt.EncryptLayerFinalizer
 	)
 	if toEncrypt {
-		switch srcInfo.MediaType {
-		case manifest.DockerV2Schema2LayerMediaType, ocispec.MediaTypeImageLayerGzip:
-			encryptMediaType = manifest.DockerV2Schema2LayerGzipEncMediaType
-		case ocispec.MediaTypeImageLayer:
-			encryptMediaType = manifest.DockerV2Schema2LayerEncMediaType
+		encryptMediaType, err = manifest.GetEncryptedMediaType(srcInfo.MediaType)
+		if err != nil {
+			return types.BlobInfo{}, errors.Wrapf(err, "Error encrypting layer %s", srcInfo.Digest)
 		}
 
 		if encryptMediaType != "" && c.encryptConfig != nil {
