@@ -302,7 +302,7 @@ func (c *copier) copyOneImage(ctx context.Context, policyContext *signature.Poli
 	}
 
 	if options.EncryptLayers != nil && !src.SupportsEncryption(ctx) {
-		return nil, errors.Wrap(err, "Encryption requested but not supported by source image type")
+		return nil, errors.New("Encryption requested but not supported by source image type")
 	}
 
 	// If the destination is a digested reference, make a note of that, determine what digest value we're
