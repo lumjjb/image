@@ -13,10 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containers/image/docker/reference"
-	"github.com/containers/image/image"
-	"github.com/containers/image/manifest"
-	"github.com/containers/image/pkg/blobinfocache"
 	"github.com/containers/image/v4/docker/reference"
 	"github.com/containers/image/v4/image"
 	"github.com/containers/image/v4/manifest"
