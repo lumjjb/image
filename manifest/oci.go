@@ -254,6 +254,7 @@ func (m *OCI1) ImageID([]digest.Digest) (string, error) {
 
 // IsEncryptedLayer indicates whether the blob is is encrypted
 func IsEncryptedLayer(b types.BlobInfo) bool {
+	// Check if encrypted mediatype
 	return b.MediaType == ociencspec.MediaTypeLayerGzipEnc ||
 		b.MediaType == ociencspec.MediaTypeLayerEnc
 }
