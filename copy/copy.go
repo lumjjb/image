@@ -1061,7 +1061,6 @@ func (c *copier) copyBlobFromStream(ctx context.Context, srcStream io.Reader, sr
 			finalizer = fin
 			inputInfo.Digest = ""
 			inputInfo.Size = -1
-			inputInfo.MediaType = encryptMediaType
 			encrypted = true
 		}
 	}
