@@ -100,7 +100,7 @@ const (
 	// no compression or decompression.
 	PreserveOriginal LayerCompression = iota
 	// Decompress indicates the layer must be decompressed
-	Decompress
+	Decompress = iota + 1
 	// Compress indicates the layer must be compressed
 	Compress
 )
@@ -109,8 +109,9 @@ const (
 type LayerCrypto int
 
 const (
-	// None indicates the layer must be preserved, no encryption/decryption
-	None LayerCrypto = iota
+	// PreserveOriginalCrypto indicates the layer must be preserved, ie
+	// no encryption/decryption
+	PreserveOriginalCrypto LayerCrypto = iota
 	// Encrypt indicates the layer is encrypted
 	Encrypt
 	// Decrypt indicates the layer is decrypted

@@ -3,6 +3,7 @@ package manifest
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/containers/image/v4/pkg/compression"
 	"github.com/containers/image/v4/types"
@@ -262,23 +263,26 @@ func IsEncryptedLayer(b types.BlobInfo) bool {
 // GetEncryptedMediaType will return the mediatype to its encrypted counterpart and return
 // an error if the mediatype does not support encryption
 func GetEncryptedMediaType(mediatype string) (string, error) {
-	switch mediatype {
-	case DockerV2Schema2LayerMediaType, imgspecv1.MediaTypeImageLayerGzip:
-		return ociencspec.MediaTypeLayerGzipEnc, nil
-	case imgspecv1.MediaTypeImageLayer:
-		return ociencspec.MediaTypeLayerEnc, nil
+	for _, s := range strings.Split(mediatype, "+")[1:] {
+		if s == "encrypted" {
+			return "", errors.Errorf("unsupportedmediatype: %v already encrypted", mediatype)
+		}
 	}
+	unsuffixedMediatype := strings.Split(mediatype, "+")[0]
+	switch unsuffixedMediatype {
+	case DockerV2Schema2LayerMediaType, imgspecv1.MediaTypeImageLayer, imgspecv1.MediaTypeImageLayerNonDistributable:
+		return mediatype + "+encrypted", nil
+	}
+
 	return "", errors.Errorf("unsupported mediatype to encrypt: %v", mediatype)
 }
 
 // GetDecryptedMediaType will return the mediatype to its decrypted counterpart and return
 // an error if the mediatype does not support encryption
 func GetDecryptedMediaType(mediatype string) (string, error) {
-	switch mediatype {
-	case ociencspec.MediaTypeLayerGzipEnc:
-		return imgspecv1.MediaTypeImageLayerGzip, nil
-	case ociencspec.MediaTypeLayerEnc:
-		return imgspecv1.MediaTypeImageLayer, nil
+	strimmed := strings.TrimSuffix(mediatype, "+encrypted")
+	if strimmed == mediatype {
+		return "", errors.Errorf("unsupported mediatype to decrypt: %v", mediatype)
 	}
-	return "", errors.Errorf("unsupported mediatype to decrypt: %v", mediatype)
+	return strimmed, nil
 }
