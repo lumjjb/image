@@ -71,9 +71,6 @@ func (f fakeImageSource) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpd
 func (f fakeImageSource) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
 	panic("Unexpected call to a mock function")
 }
-func (f fakeImageSource) SupportsEncryption(ctx context.Context) bool {
-	panic("Unexpected call to a mock function")
-}
 func (f fakeImageSource) Size() (int64, error) {
 	panic("Unexpected call to a mock function")
 }

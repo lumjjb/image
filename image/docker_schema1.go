@@ -210,8 +210,3 @@ func (m *manifestSchema1) convertToManifestOCI1(ctx context.Context, updateInfo 
 		InformationOnly:  updateInfo,
 	})
 }
-
-// SupportsEncryption returns if encryption is supported for the manifest type
-func (m *manifestSchema1) SupportsEncryption(context.Context) bool {
-	return false
-}
